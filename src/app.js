@@ -1,17 +1,30 @@
-import 'dotenv/config'; // This fixes the "is not a function" error AND loads variables early
+import 'dotenv/config';
 import express from "express";
 import cors from "cors";
 import uploadRoute from "./routes/upload.js";
 import connectDB from "../db.js";
 
 const app = express();
-app.use(cors());
-app.use(express.json()); // Essential for handling JSON data
+
+// CORS configuration
+const corsOptions = {
+  origin: [
+    'https://main.d28r2hluiqwji1.amplifyapp.com', // your Amplify frontend URL
+    'http://localhost:3000' // optional for local testing
+  ],
+  methods: ["GET", "POST", "PUT", "DELETE", "HEAD"],
+  credentials: true, // allows cookies if needed
+  allowedHeaders: ["Content-Type", "Authorization"]
+};
+
+app.use(cors(corsOptions));
+app.use(express.json());
+
 connectDB();
+
 // routes
 app.use("/api", uploadRoute);
 
-// Added a fallback PORT in case your .env is not found
 const PORT = process.env.PORT || 5000;
 
 app.listen(PORT, () => {
