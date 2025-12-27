@@ -2,7 +2,6 @@ import 'dotenv/config';
 import express from "express";
 import cors from "cors";
 import uploadRoute from "./routes/upload.js";
-import connectDB from "../db.js";
 
 const app = express();
 
@@ -13,14 +12,13 @@ const corsOptions = {
     'http://localhost:3000' // optional for local testing
   ],
   methods: ["GET", "POST", "PUT", "DELETE", "HEAD"],
-  credentials: true, // allows cookies if needed
   allowedHeaders: ["Content-Type", "Authorization"]
 };
 
 app.use(cors(corsOptions));
 app.use(express.json());
 
-connectDB();
+
 
 // routes
 app.use("/api", uploadRoute);
