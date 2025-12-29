@@ -1,91 +1,114 @@
 import express from "express";
 import multer from "multer";
-import { PutObjectCommand } from "@aws-sdk/client-s3";
 import {
+  PutObjectCommand,
   ListObjectsV2Command,
   GetObjectCommand,
   DeleteObjectCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { s3 } from "../s3.js";
+
+import s3 from "../s3.js";
+import File from "../models/File.js";
 
 const router = express.Router();
-const upload = multer(); // store file in memory
+const upload = multer({ storage: multer.memoryStorage() });
 
-// POST /upload
+/* =======================
+   POST /api/upload
+   Upload to S3 + Save to Mongo
+======================= */
 router.post("/upload", upload.single("file"), async (req, res) => {
   try {
-    // S3 upload params
-    const params = {
-      Bucket: process.env.AWS_BUCKET_NAME,
-      Key: `uploads/${Date.now()}-${req.file.originalname}`, // folder/file
-      Body: req.file.buffer,
-      ContentType: req.file.mimetype,
-    };
+    if (!req.file) {
+      return res.status(400).json({ error: "No file uploaded" });
+    }
+    // console.log("1. Starting S3 Upload...");
+    const file = req.file;
+    const s3Key = `uploads/${Date.now()}-${file.originalname}`;
 
-    await s3.send(new PutObjectCommand(params));
+    // Upload to S3
+    await s3.send(
+      new PutObjectCommand({
+        Bucket: process.env.AWS_BUCKET_NAME,
+        Key: s3Key,
+        Body: file.buffer,
+        ContentType: file.mimetype,
+      })
+    );
+    // console.log("2. S3 Upload Finished.");
+    // Save metadata to MongoDB
+    const newFile = await File.create({
+      originalName: file.originalname,
+      s3Key,
+      fileUrl: `https://${process.env.AWS_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${s3Key}`,
+      fileType: file.mimetype,
+      fileSize: file.size,
+    });
+    
 
-    res.json({ message: "File uploaded successfully" });
+    res.status(201).json(newFile);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
+
+/* =======================
+   GET /api/files
+   Read from Mongo + presigned URLs
+======================= */
 router.get("/files", async (req, res) => {
   try {
-    const listParams = {
-      Bucket: process.env.AWS_BUCKET_NAME,
-    };
+    const files = await File.find().sort({ createdAt: -1 });
 
-    // 1. Fetch the list of objects from S3
-    const data = await s3.send(new ListObjectsV2Command(listParams));
-
-    if (!data.Contents) {
-      return res.json({ message: "Bucket is empty", files: [] });
-    }
-
-    // 2. For each file, generate a temporary viewing URL (Pre-signed URL)
-    const fileList = await Promise.all(
-      data.Contents.map(async (file) => {
-        const getCommand = new GetObjectCommand({
+    const result = await Promise.all(
+      files.map(async (file) => {
+        const command = new GetObjectCommand({
           Bucket: process.env.AWS_BUCKET_NAME,
-          Key: file.Key,
+          Key: file.s3Key,
         });
 
-        // The URL will expire in 1 hour (3600 seconds)
-        const url = await getSignedUrl(s3, getCommand, { expiresIn: 3600 });
+        const viewUrl = await getSignedUrl(s3, command, {
+          expiresIn: 3600,
+        });
 
         return {
-          name: file.Key,
-          size: (file.Size / 1024).toFixed(2) + " KB",
-          lastModified: file.LastModified,
-          viewUrl: url,
+          ...file.toObject(),
+          viewUrl,
         };
       })
     );
 
-    res.json(fileList);
+    res.json(result);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: "Error fetching files" });
   }
 });
+
+/* =======================
+   DELETE /api/delete
+   Delete from S3 + Mongo
+======================= */
 router.delete("/delete", async (req, res) => {
   try {
-    const { key } = req.body; // Expecting { "key": "uploads/123-file.jpg" }
+    const { key } = req.body;
 
     if (!key) {
-      return res.status(400).json({ error: "File key is required to delete" });
+      return res.status(400).json({ error: "File key required" });
     }
 
-    const deleteParams = {
-      Bucket: process.env.AWS_BUCKET_NAME,
-      Key: key,
-    };
+    await s3.send(
+      new DeleteObjectCommand({
+        Bucket: process.env.AWS_BUCKET_NAME,
+        Key: key,
+      })
+    );
 
-    await s3.send(new DeleteObjectCommand(deleteParams));
+    await File.findOneAndDelete({ s3Key: key });
 
-    res.json({ message: `File ${key} deleted successfully` });
+    res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: "Delete failed" });
   }
 });
 
