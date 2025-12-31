@@ -9,7 +9,7 @@ const app = express();
 // CORS configuration
 const corsOptions = {
   origin: [
-    'https://main.d28r2hluiqwji1.amplifyapp.com', // your Amplify frontend URL
+    process.env.FRONTEND_URL, // your Amplify frontend URL
     'http://localhost:3000' // optional for local testing
   ],
   methods: ["GET", "POST", "PUT", "DELETE", "HEAD"],
